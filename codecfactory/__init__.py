@@ -1,1 +1,4 @@
-/home/caretaker82/bin/codecfactory2/__init__.py
+#!/usr/bin/python
+from exceptions import *
+from basecodec import BaseCodec
+from stringcodec import *
