@@ -1,5 +1,5 @@
 #!/usr/bin/python
-from exc import *
+from codecfactory.exc import DecodeError, NoMatch, UnexpectedEndOfData, ExcessData, EncodeError, EncodeMatchError
 import regex as re
 
 __all__ = ["BaseCodec", "ws_match", "skip_whitespace", "NOHOOK", "SINGLE", "ARGS", "KWARGS", "ALLATONCE", "PIECEBYPIECE"]
@@ -65,12 +65,19 @@ class ReadBuffer(object):
 def skip_whitespace(data, offset=0, discarddata=True):
     """Function used to skip over whitespace in data."""
     if isinstance(data, ReadBuffer):
-        offset = data.regex_op(ws_match, pos=offset).end()
-        if discarddata:
-            data.discard(offset)
-            return 0
+        return skip_whitespace_in_file(data, offset, discarddata)
     else:
-        offset = ws_match.match(data, pos=offset).end()
+        return skip_whitespace_in_string(data, offset)
+
+def skip_whitespace_in_string(string, offset=0):
+    return ws_match.match(string, pos=offset).end()
+
+def skip_whitespace_in_file(data, offset=0, discarddata=True):
+    """Function used to skip over whitespace in data."""
+    offset = data.regex_op(ws_match.match, pos=offset).end()
+    if discarddata:
+        data.discard(offset)
+        return 0
     return offset
 
 NOHOOK = 0
@@ -152,7 +159,7 @@ class BaseCodec(object):
             obj, offset = self._decode(data, offset)
         try:
             obj = self.applyhook(obj)
-        except BaseException, exc:
+        except BaseException as exc:
             raise DecodeError(self, "Exception encountered while applying hook.", offset + (data.discarded if isinstance(data, ReadBuffer) else 0), exc)
         return obj, offset
 
@@ -191,7 +198,7 @@ class BaseCodec(object):
                 if data.readdata() == 0 and data._file.closed:
                     raise
                 continue
-            except DecodeError, exc:
+            #except DecodeError as exc:
                 raise DecodeError(exc.codec, exc.message, exc.offset + data.discarded, exc.exc)
 
     def _encode(self, obj, indent="    ", indentlevel=0):
@@ -223,7 +230,7 @@ class BaseCodec(object):
         data is returned as a string.
         """
         if not self.validate_for_encode(obj):
-            raise EncodeMatchError, "Expected %s, got %s instead." % (self.allowedtype, type(obj))
+            raise EncodeMatchError(obj, "Expected %s, got %s instead." % (self.allowedtype, type(obj)))
         obj = self.reversehook(obj)
 
         if hasattr(file, "write"):
@@ -244,7 +251,13 @@ class BaseCodec(object):
         is a list or dict with many items. As such, one may reimplement _encode_to_file to be able to
         make use of each child encoder's _encode_to_file method.
         """
-        file.write(self._encode(obj, indent, initialindent))
+        encoded = self._encode(obj, indent, initialindent)
+        if len(encoded):
+            """
+            For some odd reason, if file is of type LZMA.LZMAFile, its write method chokes on empty
+            strings. The workaround for this is only write non-empty strings.
+            """
+            file.write(encoded)
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__.__name__, self.name)

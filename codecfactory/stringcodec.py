@@ -1,5 +1,6 @@
-from basecodec import BaseCodec, ReadBuffer
-from exc import *
+from codecfactory.basecodec import BaseCodec, ReadBuffer
+from codecfactory.exc import (DecodeError, NoMatch, UnexpectedEndOfData, ExcessData,
+                 EncodeError, EncodeMatchError)
 import regex
 
 __all__ = ["StringCodec", "pystringcodec"]
@@ -53,7 +54,7 @@ class StringCodec(BaseCodec):
         if match is None:
             raise DecodeError(self, "Unable to match string.")
         elif match.partial:
-            raise UnexpectedEndOfData(self)
+            raise UnexpectedEndOfData(self, "Unexpected end of data encountered while attempting to decode string.")
 
         retstring = self.unescape_char_match.sub(self.unescape_func, match.group())
         offset = match.end()

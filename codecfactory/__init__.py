@@ -1,7 +1,7 @@
 #!/usr/bin/python
-from exc import *
-from basecodec import BaseCodec
-from stringcodec import *
-from codecset import *
-from numeralcodecs import *
-from regexcodec import *
+from codecfactory.exc import DecodeError, NoMatch, UnexpectedEndOfData, ExcessData, EncodeError, EncodeMatchError
+from codecfactory.basecodec import BaseCodec
+from codecfactory.stringcodec import StringCodec, pystringcodec
+from codecfactory.codecset import CodecSet
+from codecfactory.numeralcodecs import (uintcodec, intcodec, floatcodec, rationalcodec, realcodec)
+from codecfactory.regexcodec import RegExCodec

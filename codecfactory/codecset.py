@@ -1,5 +1,5 @@
-from basecodec import BaseCodec, ReadBuffer, skip_whitespace
-from exc import *
+from codecfactory.basecodec import BaseCodec, ReadBuffer, skip_whitespace
+from codecfactory.exc import DecodeError, NoMatch, UnexpectedEndOfData, ExcessData, EncodeError, EncodeMatchError
 
 __all__ = ["CodecSet"]
 
@@ -7,6 +7,7 @@ class CodecSet(BaseCodec):
     """Matches"""
     def __init__(self, codecs=[], name="CodecSet"):
         self.codecs = list(codecs)
+        self.name = name
 
     def _decode(self, data, offset=0):
         for codec in self.codecs:

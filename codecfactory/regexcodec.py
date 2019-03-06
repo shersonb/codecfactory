@@ -1,6 +1,7 @@
 #!/usr/bin/python
-from basecodec import BaseCodec, SINGLE
-from exc import *
+from codecfactory.basecodec import BaseCodec, SINGLE
+from codecfactory.exc import (DecodeError, NoMatch, UnexpectedEndOfData, ExcessData,
+                 EncodeError, EncodeMatchError)
 import regex
 
 __all__ = ["RegExCodec"]

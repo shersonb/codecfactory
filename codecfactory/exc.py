@@ -14,8 +14,8 @@ class NoMatch(DecodeError):
         super(NoMatch, self).__init__(codec, "No Match.")
 
 class UnexpectedEndOfData(DecodeError):
-    def __init__(self, codec):
-        super(UnexpectedEndOfData, self).__init__(codec, "Unexpected end of data.")
+    def __init__(self, codec, message="Unexpected end of data."):
+        super(UnexpectedEndOfData, self).__init__(codec, message)
 
 class ExcessData(DecodeError):
     def __init__(self, codec, offset):
