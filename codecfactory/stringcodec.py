@@ -2,6 +2,8 @@ from basecodec import BaseCodec, ReadBuffer
 from exc import *
 import regex
 
+__all__ = ["StringCodec", "pystringcodec"]
+
 class StringCodec(BaseCodec):
     def __init__(self, decode_string_match, unescape_char_match, unescape_func,
                  escape_char_match, escape_func,

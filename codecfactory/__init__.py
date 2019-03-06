@@ -1,4 +1,4 @@
 #!/usr/bin/python
-from exceptions import *
+from exc import *
 from basecodec import BaseCodec
 from stringcodec import *
