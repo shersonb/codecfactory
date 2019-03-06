@@ -1,6 +1,7 @@
 #!/usr/bin/python
 from codecfactory.exc import DecodeError, NoMatch, UnexpectedEndOfData, ExcessData, EncodeError, EncodeMatchError
 import regex as re
+import sys
 
 __all__ = ["BaseCodec", "ws_match", "skip_whitespace", "NOHOOK", "SINGLE", "ARGS", "KWARGS", "ALLATONCE", "PIECEBYPIECE"]
 
@@ -108,6 +109,29 @@ class BaseCodec(object):
     allowedtype = None
     discardbufferdata = True
     strip_whitespace = True
+
+    def __init__(self, hook=None, unhook=None, hook_mode=None, allowedtype=None,
+                 discardbufferdata=None, strip_whitespace=None, name=None):
+        if callable(hook):
+            self.hook = hook
+            if hook_mode is None:
+                self.hook_mode = SINGLE
+            else:
+                self.hook_mode = hook_mode
+        if callable(unhook):
+            self.unhook = unhook
+
+        if allowedtype is not None:
+            self.allowedtype = allowedtype
+
+        if discardbufferdata is not None:
+            self.discardbufferdata = bool(discardbufferdata)
+
+        if strip_whitespace is not None:
+            self.strip_whitespace = bool(strip_whitespace)
+
+        if name is not None:
+            self.name = name
 
     def applyhook(self, obj):
         """
@@ -228,6 +252,9 @@ class BaseCodec(object):
         Indentation is specified here, but implemented in _encode.
         If file is specified, encoded data is written to file. Otherwise, it is implied that the encoded
         data is returned as a string.
+
+        Note: In Python 3, some file objects will only accept 'bytes'-type data in their write methods.
+        The remedy to this is to wrap such file objects in io.TextIOWrapper.
         """
         if not self.validate_for_encode(obj):
             raise EncodeMatchError(obj, "Expected %s, got %s instead." % (self.allowedtype, type(obj)))
@@ -251,7 +278,7 @@ class BaseCodec(object):
         is a list or dict with many items. As such, one may reimplement _encode_to_file to be able to
         make use of each child encoder's _encode_to_file method.
         """
-        encoded = self._encode(obj, indent, initialindent)
+        encoded = self._encode(obj, indent, indentlevel)
         if len(encoded):
             """
             For some odd reason, if file is of type LZMA.LZMAFile, its write method chokes on empty

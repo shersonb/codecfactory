@@ -4,7 +4,14 @@ from codecfactory.exc import DecodeError, NoMatch, UnexpectedEndOfData, ExcessDa
 __all__ = ["CodecSet"]
 
 class CodecSet(BaseCodec):
-    """Matches"""
+    """
+    Matches any one codec in a provided list of codecs.
+
+    Note: If a child codec has a further child codec, it is the child codec's responsibility
+    to capture and handle it's child's NoMatch exceptions so that CodecSet only sees
+    NoMatch exceptions raised by its immediate children. If CodecSet sees any NoMatch
+    exception from any of its grandchildren, then this may hide actual decoding errors.
+    """
     def __init__(self, codecs=[], name="CodecSet"):
         self.codecs = list(codecs)
         self.name = name
@@ -21,14 +28,14 @@ class CodecSet(BaseCodec):
     def _encode(self, obj, indent="    ", indentlevel=0):
         for codec in self.codecs:
             if codec.validate_for_encode(obj):
-                return codec.encode(obj, indent=indent, indentlevel=indentlevel)
+                return codec.encode(obj, indent=indent, indentlevel=indentlevel, indentfirstline=False)
         else:
             raise EncodeMatchError(self, obj, "No codec found for '%s' object." % type(obj).__name__)
 
-    def _encode_to_file(self, obj, file, indent="    ", indentlevel=0, initialindent=None):
+    def _encode_to_file(self, obj, file, indent="    ", indentlevel=0, indentfirstline=None):
         for codec in self.codecs:
             if codec.validate_for_encode(obj):
-                return codec.encode_to_file(obj, file, indent, indentlevel, initialindent)
+                return codec.encode(obj, file=file, indent=indent, indentlevel=indentlevel, indentfirstline=indentfirstline)
         else:
             raise EncodeMatchError(self, obj, "No codec found for '%s' object." % type(obj).__name__)
 

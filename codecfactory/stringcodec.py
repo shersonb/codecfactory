@@ -2,13 +2,21 @@ from codecfactory.basecodec import BaseCodec, ReadBuffer
 from codecfactory.exc import (DecodeError, NoMatch, UnexpectedEndOfData, ExcessData,
                  EncodeError, EncodeMatchError)
 import regex
-
+import sys
 __all__ = ["StringCodec", "pystringcodec"]
+
+if sys.version_info.major >= 3:
+    strtype = str
+else:
+    strtype = (str, unicode)
+
 
 class StringCodec(BaseCodec):
     def __init__(self, decode_string_match, unescape_char_match, unescape_func,
                  escape_char_match, escape_func,
-                 begin_delim='"', end_delim='"', name="StringCodec"):
+                 begin_delim='"', end_delim='"',
+                 hook=None, unhook=None, allowedtype=strtype,
+                 name="StringCodec"):
         """
         Codec for use in encoding/decoding strings.
 
@@ -32,8 +40,6 @@ class StringCodec(BaseCodec):
         The 'pystringcodec' is an implementation of this class that encodes/decodes
         python strings.
         """
-        self.name = name
-
         self.decode_string_match = decode_string_match
         self.unescape_char_match = unescape_char_match
         self.unescape_func = unescape_func
@@ -43,6 +49,9 @@ class StringCodec(BaseCodec):
 
         self.begin_delim = begin_delim
         self.end_delim = end_delim
+
+        BaseCodec.__init__(self, hook=hook, unhook=unhook,
+                           allowedtype=allowedtype, name=name)
 
     def _decode(self, string, offset):
         if not string[offset:].startswith(self.begin_delim):
