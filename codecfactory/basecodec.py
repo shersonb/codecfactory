@@ -2,83 +2,26 @@
 from codecfactory.exc import DecodeError, NoMatch, UnexpectedEndOfData, ExcessData, EncodeError, EncodeMatchError
 import regex as re
 import sys
+import io
+from codecfactory.readbuffer import ReadBuffer
 
 __all__ = ["BaseCodec", "ws_match", "skip_whitespace", "NOHOOK", "SINGLE", "ARGS", "KWARGS", "ALLATONCE", "PIECEBYPIECE"]
 
+if sys.version_info.major >= 3:
+    strtype = str
+else:
+    strtype = (str, unicode)
+
 ws_match = re.compile(r'[ \t\n\r]*', flags=re.VERBOSE | re.MULTILINE | re.DOTALL)
 
-class ReadBuffer(object):
-    """
-    Class used to wrap around a file or file-like object so that objects can be decoded as soon as possible
-    witout the need to read the entire file into memory.
-    
-    The basic idea is to read data one line at a time as it is needed for successive decode operations.
-    A discard method is included so that data can be discarded when it is no longer needed.
-    """
-    def __init__(self, file, data=""):
-        self._file = file
-        self.data = data
-        self.discarded = 0
-
-    def readdata(self):
-        """Called when we need to read more data from the file object and append it to self.data."""
-        line = self._file.readline()
-        self.data += line
-        if line == "":
-            self._file.close()
-        return len(line)
-
-    def discard(self, offset):
-        """We may not necessarily want to keep all the raw data from the file, so we may periodically
-        wish to discard the data once it has been decoded and processed. This is to help keep self.data
-        relatively small."""
-        self.data = self.data[offset:]
-        self.discarded += offset
-
-    def regex_op(self, re_method, pos=None, endpos=None, concurrent=None):
-        """
-        Special: Apply a regular expression search on the file. The support in the regex module for
-        indicating a partial match allows us to determine that a match may be possible if more data is read
-        from the file.
-        """
-        while True:
-            result = re_method(self.data, pos=pos, endpos=endpos, concurrent=concurrent, partial=True)
-            if result is None:
-                """No match, no possibilty of a partial match."""
-                return None
-            elif result.end() < len(self.data):
-                """
-                A match is found, and it ends before the end of the current data.
-                result.partial == False implied.
-                """
-                return result
-            elif self._file.closed or self.readdata() == 0:
-                """
-                File object is closed (or at least will be if self.readdata() is called and no data is read). At this point, the match is either complete and ends at the end of the file,
-                or it is a partial match. If the match is flagged as partial, the match could still be complete, but
-                we won't know that until we rerun the method with partial=False. If the match is a partial, but
-                incomplete, there is no hope of obtaining a complete match."""
-                if not result.partial:
-                    """We do not need to rerun the re_method."""
-                    return result
-                return re_method(self.data, pos=pos, endpos=endpos, concurrent=concurrent, partial=False)
-
-def skip_whitespace(data, offset=0, discarddata=True):
+def skip_whitespace(readbuf, offset=0, discarddata=True):
     """Function used to skip over whitespace in data."""
-    if isinstance(data, ReadBuffer):
-        return skip_whitespace_in_file(data, offset, discarddata)
-    else:
-        return skip_whitespace_in_string(data, offset)
+    offset = readbuf.regex_op(ws_match.match, pos=offset).end()
 
-def skip_whitespace_in_string(string, offset=0):
-    return ws_match.match(string, pos=offset).end()
-
-def skip_whitespace_in_file(data, offset=0, discarddata=True):
-    """Function used to skip over whitespace in data."""
-    offset = data.regex_op(ws_match.match, pos=offset).end()
     if discarddata:
-        data.discard(offset)
+        readbuf.discard(offset)
         return 0
+
     return offset
 
 NOHOOK = 0
@@ -112,12 +55,19 @@ class BaseCodec(object):
 
     def __init__(self, hook=None, unhook=None, hook_mode=None, allowedtype=None,
                  discardbufferdata=None, strip_whitespace=None, name=None):
+        if hook is None and hasattr(self, "_hook"):
+            hook = self._hook
+
+        if unhook is None and hasattr(self, "_unhook"):
+            unhook = self._unhook
+
         if callable(hook):
             self.hook = hook
             if hook_mode is None:
                 self.hook_mode = SINGLE
             else:
                 self.hook_mode = hook_mode
+
         if callable(unhook):
             self.unhook = unhook
 
@@ -151,40 +101,57 @@ class BaseCodec(object):
         """
         To encode an object, we want to reverse the effect of self.applyhook first.
         """
-        if self.hook_mode in (SINGLE, ARGS, KWARGS):
+        if callable(self.unhook):
             return self.unhook(obj)
         return obj
 
-    def _decode(self, string, offset=0):
+    def _decode(self, readbuf, offset=0, discardbufferdata=None):
         """
         Actual decoding goes on in this method. Accepts only string, buffer (python's built-in type),
         or unicode objects. This is a method to be overridden in subclasses.
+
+        Parameter 'discardbufferdata' should be passed to child codecs and not be
+        directly implemented here.
         """
         raise DecodeError(self, "Not implemented: Please implement the '_decode' method.")
 
-    def decodeone(self, data, offset=0):
+    def decodeone(self, readbuf, offset=0, discardbufferdata=None):
         """
+        Wraps around _decode, and automatically reads more data in from readbuf whenever
+        needed, so that this does not need to be done when reimplementing _decode.
+
+        Basic rule of thumb: Reimplement _decode, but always call decodeone.
+
         Decodes one object from data, returns the object and offset of the end of the match.
         Use this method if you wish to decode an object, but expect to decode more afterwards.
         """
+
+        discardbufferdata = discardbufferdata if discardbufferdata is not None else self.discardbufferdata
+
         # Trim leading whitespace.
         if self.strip_whitespace:
-            offset = skip_whitespace(data, offset, self.discardbufferdata)
+            offset = skip_whitespace(readbuf, offset, discardbufferdata)
 
-        # Pass to self._decode_from_file if data is a ReadBuffer object.
-        if isinstance(data, ReadBuffer):
-            obj, offset = self._decode_from_file(data, offset)
-            if self.discardbufferdata:
-                data.discard(offset)
-                offset = 0
+        while True:
+            try:
+                (obj, offset) = self._decode(readbuf, offset, discardbufferdata=discardbufferdata)
+            except UnexpectedEndOfData:
+                if readbuf._file.closed or readbuf.readdata() == 0:
+                    raise
+                continue
+            else:
+                break
 
-        # Otherwise, it is assumed data is str, buffer, or unicode, and gets passed to self._decode
-        else:
-            obj, offset = self._decode(data, offset)
+        if discardbufferdata:
+            readbuf.discard(offset)
+            offset = 0
+
         try:
             obj = self.applyhook(obj)
         except BaseException as exc:
-            raise DecodeError(self, "Exception encountered while applying hook.", offset + (data.discarded if isinstance(data, ReadBuffer) else 0), exc)
+            raise DecodeError(self, "Exception encountered while applying hook.",
+                              readbuf.absoffset(offset), exc)
+
         return obj, offset
 
     def decode(self, data):
@@ -193,42 +160,23 @@ class BaseCodec(object):
         Strips leading and trailing whitespace if self.strip_whitespace == True.
         An exception will be raised if excess data is detected.
         """
-        if hasattr(data, "read") and hasattr(data, "readline") and hasattr(data, "closed"):
-            data = ReadBuffer(data)
-        obj, offset = self.decodeone(data)
+        if isinstance(data, strtype):
+            readbuf = ReadBuffer(io.StringIO(data))
+        else:
+            readbuf = ReadBuffer(data)
+
+        obj, offset = self.decodeone(readbuf)
         # Trim trailing whitespace.
         if self.strip_whitespace:
-            offset = skip_whitespace(data, offset, self.discardbufferdata)
-        if isinstance(data, ReadBuffer):
-            if len(data.data) > offset or (not data._file.closed and data.readdata() > 0):
-                raise ExcessData(self,  data.discarded + offset)
-        elif len(data) > offset:
-            raise ExcessData(self, offset)
+            offset = skip_whitespace(readbuf, offset, self.discardbufferdata)
+
+        if len(readbuf.data) > offset or (not readbuf._file.closed and readbuf.readdata() > 0):
+            raise ExcessData(self, readbuf.discarded + offset)
         return obj
 
-    def _decode_from_file(self, data, offset):
+    def _encode(self, obj, file, indent="    ", indentlevel=0):
         """
-        Wraps around the _decode method, passing data from a ReadBuffer object. If
-        UnexpectedEndOfData is raised, then it is assumed a match may still be possible,
-        and so we call data.readdata() and try again.
-
-        Without reimplementing this method in subclasses that contain child decoders, each
-        child's _decode_from_file method is bypassed.
-        """
-        while True:
-            try:
-                return self._decode(data.data, offset)
-            except UnexpectedEndOfData:
-                if data.readdata() == 0 and data._file.closed:
-                    raise
-                continue
-            #except DecodeError as exc:
-                raise DecodeError(exc.codec, exc.message, exc.offset + data.discarded, exc.exc)
-
-    def _encode(self, obj, indent="    ", indentlevel=0):
-        """
-        Actual encoding goes on in this method. Returns only string or unicode objects. This is a
-        method to be overridden in subclasses.
+        Actual encoding goes on in this method, and is written to file.
 
         The parameters indent and indentlevel are implemented here, except on the first line of
         data, which is implemented in self.encode (if initialindent is True). This implies indent is
@@ -250,8 +198,12 @@ class BaseCodec(object):
         """
         Wraps around _encode. First validates data and reverses hook before performing encode.
         Indentation is specified here, but implemented in _encode.
+
         If file is specified, encoded data is written to file. Otherwise, it is implied that the encoded
         data is returned as a string.
+
+        If file is not specified, then a temporary StringIO object is created to write to, and then the
+        results are read back and returned.
 
         Note: In Python 3, some file objects will only accept 'bytes'-type data in their write methods.
         The remedy to this is to wrap such file objects in io.TextIOWrapper.
@@ -260,31 +212,22 @@ class BaseCodec(object):
             raise EncodeMatchError(obj, "Expected %s, got %s instead." % (self.allowedtype, type(obj)))
         obj = self.reversehook(obj)
 
-        if hasattr(file, "write"):
-            if indentfirstline:
-                file.write(indent*indentlevel)
-            return self._encode_to_file(obj, file, indent, indentlevel)
-        if indentfirstline:
-            return indent*indentlevel + self._encode(obj, indent, indentlevel)
+        if file is None:
+            returnstring = True
+            file = io.StringIO()
         else:
-            return self._encode(obj, indent, indentlevel)
+            returnstring = False
 
-    def _encode_to_file(self, obj, file, indent="    ", indentlevel=0, indentfirstline=True):
-        """
-        Wraps around the _encode method, writing its output to file.
-        
-        Without reimplementing this method, the behavior of _encode_to_file is to encode the entire
-        object to string, then writing the results to file. This behavior may be undesirable if the object
-        is a list or dict with many items. As such, one may reimplement _encode_to_file to be able to
-        make use of each child encoder's _encode_to_file method.
-        """
-        encoded = self._encode(obj, indent, indentlevel)
-        if len(encoded):
-            """
-            For some odd reason, if file is of type LZMA.LZMAFile, its write method chokes on empty
-            strings. The workaround for this is only write non-empty strings.
-            """
-            file.write(encoded)
+        if indentfirstline:
+            file.write(indent*indentlevel)
+
+        ret = self._encode(obj, file, indent, indentlevel)
+
+        if returnstring:
+            file.seek(0)
+            return file.read()
+
+        return ret
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__.__name__, self.name)

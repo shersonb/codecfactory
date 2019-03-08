@@ -7,6 +7,7 @@ __all__ = ["StringCodec", "pystringcodec"]
 
 if sys.version_info.major >= 3:
     strtype = str
+    unichr = chr
 else:
     strtype = (str, unicode)
 
@@ -53,38 +54,52 @@ class StringCodec(BaseCodec):
         BaseCodec.__init__(self, hook=hook, unhook=unhook,
                            allowedtype=allowedtype, name=name)
 
-    def _decode(self, string, offset):
-        if not string[offset:].startswith(self.begin_delim):
+    def _decode(self, readbuf, offset, discardbufferdata=None):
+        if not readbuf.data[offset:].startswith(self.begin_delim):
             raise NoMatch(self)
         offset += len(self.begin_delim)
 
-        match = self.decode_string_match.match(string, pos=offset, partial=True)
+        retstring = ""
+        while True:
+            match = self.decode_string_match.match(readbuf.data, pos=offset, partial=True)
 
-        if match is None:
-            raise DecodeError(self, "Unable to match string.")
-        elif match.partial:
-            raise UnexpectedEndOfData(self, "Unexpected end of data encountered while attempting to decode string.")
+            if match is None:
+                lineno, char = readbuf.abspos(offset)
+                raise DecodeError(self, "Unable to match string on line %d, character %d ('%s')." % (
+                    lineno, char, readbuf.data[offset:offset+16]), readbuf.absoffset(offset))
+            elif match.partial:
+                raise UnexpectedEndOfData(self, "Unexpected end of data encountered while attempting to decode string.")
 
-        retstring = self.unescape_char_match.sub(self.unescape_func, match.group())
-        offset = match.end()
+            chunk = self.unescape_char_match.sub(self.unescape_func, match.group())
+            retstring += chunk
+            offset = match.end()
 
-        if not string[offset:].startswith(self.end_delim):
-            raise DecodeError(self, "Unexpected character, escape sequence, or missing end delimiter.")
-        offset += len(self.end_delim)
+            if len(chunk) == 0:
+                if not readbuf.data[offset:].startswith(self.end_delim):
+                    lineno, char = readbuf.abspos(offset)
+                    if readbuf.data[offset:].startswith("\n"):
+                        raise DecodeError(self,
+                            "EOL while scanning string (line %d)." % lineno, readbuf.absoffset(offset))
+                    raise DecodeError(self,
+                        "Unexpected character, escape sequence, or missing end delimiter on line %d, character %d ('%s')." % (
+                    lineno, char, readbuf.data[offset:offset+2]), readbuf.absoffset(offset))
+                offset += len(self.end_delim)
+                break
+
 
         return retstring, offset
         
 
-    def _encode(self, string, indent="    ", indentlevel=0):
+    def _encode(self, string, file, indent="    ", indentlevel=0):
         encodedstring = self.escape_char_match.sub(self.escape_func, string)
-        return self.begin_delim + encodedstring + self.end_delim
+        return file.write(self.begin_delim + encodedstring + self.end_delim)
 
 
 escape_codes={"r": "\r", "n": "\n", "t": "\t", "a": "\a", "b": "\b", "f": "\f", "\\": "\\", "\"": "\""}
 escaped_escapes = regex.escape("".join(escape_codes.values()))
 rescape_codes = {val: key for key, val in escape_codes.items()}
 unescape_char_match = regex.compile(r"\\([%s]|x([0-f]{2})|u([0-f]{4})|U([0-f]{8}))" % regex.escape("".join(escape_codes.keys())))
-decode_string_match = regex.compile(r"(?:\\(?:[%s]|x[0-f]{2}|u[0-f]{4}|U[0-f]{8})|[^%s\x00-\x1f\x7f-\U0010ffff])*" % (
+decode_string_match = regex.compile(r"(?:\\(?:[%s]|x[0-f]{2}|u[0-f]{4}|U[0-f]{8})|[^%s\x00-\x1f\x7f-\U0010ffff]){0,4096}" % (
                                     regex.escape("".join(escape_codes.keys())), regex.escape("".join(escape_codes.values()))
                                     ))
 escape_char_match = regex.compile(r"[%s\x00-\x1f\x7f-\U0010ffff]" % regex.escape("".join(escape_codes.values())))
