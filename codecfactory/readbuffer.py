@@ -17,10 +17,12 @@ class ReadBuffer(object):
         self.lines_discarded = 0
         self.discarded_on_current_line = 0
 
-    def readdata(self):
+    def readdata(self, count=None):
         """Called when we need to read more data from the file object and append it to self.data."""
-        #line = self._file.readline()
-        line = self._file.read(4096)
+        if count is None:
+            line = self._file.readline()
+        else:
+            line = self._file.read(count)
         self.data += line
         if line == "":
             self._file.close()
@@ -68,7 +70,7 @@ class ReadBuffer(object):
                 result.partial == False implied.
                 """
                 return result
-            elif self._file.closed or self.readdata() == 0:
+            elif self._file.closed or self.readdata(1024) == 0:
                 """
                 File object is closed (or at least will be if self.readdata() is called and no data is read). At this point, the match is either complete and ends at the end of the file,
                 or it is a partial match. If the match is flagged as partial, the match could still be complete, but
@@ -78,3 +80,8 @@ class ReadBuffer(object):
                     """We do not need to rerun the re_method."""
                     return result
                 return re_method(self.data, pos=pos, endpos=endpos, concurrent=concurrent, partial=False)
+
+    def string_match(self, string, offset):
+        if offset + len(string) > len(self.data) and not self._file.closed:
+            self.readdata(offset + len(string) - len(self.data))
+        return self.data[offset:].startswith(string)

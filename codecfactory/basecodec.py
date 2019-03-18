@@ -63,9 +63,9 @@ class BaseCodec(object):
 
         if callable(hook):
             self.hook = hook
-            if hook_mode is None:
+            if hook_mode is None and self.hook_mode is NOHOOK:
                 self.hook_mode = SINGLE
-            else:
+            elif self.hook_mode is NOHOOK:
                 self.hook_mode = hook_mode
 
         if callable(unhook):
@@ -116,6 +116,7 @@ class BaseCodec(object):
         raise DecodeError(self, "Not implemented: Please implement the '_decode' method.")
 
     def decodeone(self, readbuf, offset=0, discardbufferdata=None):
+        startabsoffset = readbuf.absoffset(offset)
         """
         Wraps around _decode, and automatically reads more data in from readbuf whenever
         needed, so that this does not need to be done when reimplementing _decode.
@@ -146,11 +147,13 @@ class BaseCodec(object):
             readbuf.discard(offset)
             offset = 0
 
+        endabsoffset = readbuf.absoffset(offset)
+
         try:
             obj = self.applyhook(obj)
         except BaseException as exc:
             raise DecodeError(self, "Exception encountered while applying hook.",
-                              readbuf.absoffset(offset), exc)
+                              (startabsoffset, endabsoffset), exc)
 
         return obj, offset
 
@@ -209,7 +212,7 @@ class BaseCodec(object):
         The remedy to this is to wrap such file objects in io.TextIOWrapper.
         """
         if not self.validate_for_encode(obj):
-            raise EncodeMatchError(obj, "Expected %s, got %s instead." % (self.allowedtype, type(obj)))
+            raise EncodeMatchError(self, obj, "Expected %s, got %s instead." % (self.allowedtype, type(obj)))
         obj = self.reversehook(obj)
 
         if file is None:

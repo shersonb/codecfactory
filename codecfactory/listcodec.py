@@ -14,7 +14,8 @@ class ListCodec(BaseCodec):
                  notify_encode=None, notify_decode=None,
                  multiline=True,
                  skip_whitespace_between_items=True,
-                 discardbufferdata=True
+                 discardbufferdata=True,
+                 name="ListCodec"
                  ):
         """
         'item_codec': Default codec used to encode/decode items in list.
@@ -57,7 +58,8 @@ class ListCodec(BaseCodec):
         
         self.skip_whitespace_between_items = bool(skip_whitespace_between_items)
         BaseCodec.__init__(self, hook=hook, unhook=unhook, hook_mode=hook_mode,
-                           allowedtype=allowedtype, discardbufferdata=discardbufferdata)
+                           allowedtype=allowedtype, discardbufferdata=discardbufferdata,
+                           name=name)
 
     def _match_delim(self, readbuf, delim, offset=0):
         if self.skip_whitespace_between_items:
@@ -66,10 +68,10 @@ class ListCodec(BaseCodec):
         while offset + len(delim) > len(readbuf.data) and not readbuf._file.closed:
             readbuf.readdata()
 
-        if offset > len(readbuf.data):
-            raise UnexpectedEndOfData(self, "Unexpected end of string while decoding list.")
+        #if offset >= len(readbuf.data):
+            #raise UnexpectedEndOfData(self, "Unexpected end of string while decoding list.")
 
-        elif readbuf.data[offset:].startswith(delim):
+        if readbuf.string_match(delim, offset):
             return offset + len(delim)
 
         raise NoMatch(self)
@@ -127,9 +129,11 @@ class ListCodec(BaseCodec):
                 try:
                     offset = self._match_end_delim(readbuf, offset)
                 except NoMatch:
-                    lineno, char = readbuf.abspos(offset)
-                    raise DecodeError(self, "Unexpected character on line %d, character %d ('%s')." % (
-                        lineno, char, readbuf.data[offset:offset+16]), offset)
+                    if offset < len(readbuf.data):
+                        lineno, char = readbuf.abspos(offset)
+                        raise DecodeError(self, "Unexpected character on line %d, character %d ('%s')." % (
+                            lineno, char, readbuf.data[offset:offset+16]), offset)
+                    raise UnexpectedEndOfData(self, "Unexpected end of string while decoding list.")
                 return results, offset
 
     def _encode_item(self, obj, file=None, indent="    ", indentlevel=0, indentfirstline=True, k=None):
@@ -169,13 +173,11 @@ class ListCodec(BaseCodec):
 
     def _unhook(self, obj):
         suggestion = "Please implement a custom unhook function, or a 'getinitargs' method or list for this class."
-        if isinstance(obj, (list, tuple)):
-            return list(obj)
-        elif hasattr(obj, "getinitargs"):
+        if hasattr(obj, "getinitargs"):
             if callable(obj.getinitargs):
                 """
-                Assume obj.getinitargs is an instance method that returns a list of arguments that
-                returns a list of args that can be used to recreate obj using obj.__class__(*args).
+                Assume obj.getinitargs is an instance method that returns a list 'args' that can be used to recreate
+                obj using obj.__class__(*args).
                 """
                 return obj.getinitargs()
             elif isinstance(obj.getinitargs, (list, tuple)):
@@ -185,6 +187,8 @@ class ListCodec(BaseCodec):
                 return [getattr(obj, attr) for attr in obj.getinitargs]
             else:
                 raise EncodeError(self, obj, "Do not know how to work with 'getinitargs' object for '%s' object." % obj.__class__.__name__)
+        elif isinstance(obj, (list, tuple)):
+            return list(obj)
         elif hasattr(obj, "__init__") and isinstance(obj.__init__, types.MethodType):
             try:
                 argspec = inspect.getargspec(obj.__init__)

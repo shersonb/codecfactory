@@ -20,7 +20,8 @@ class DictCodec(ListCodec):
                  notify_encode=None, notify_decode=None,
                  allowedtype=None, multiline=True,
                  skip_whitespace_between_items=True,
-                 discardbufferdata=True
+                 discardbufferdata=True,
+                 name="DictCodec"
                  ):
         self.key_codec = key_codec
         self.codecs_by_key = codecs_by_key.copy()
@@ -39,7 +40,7 @@ class DictCodec(ListCodec):
                  hook=hook, unhook=unhook, hook_mode=hook_mode,
                  notify_encode=notify_encode, notify_decode=notify_decode,
                  multiline=multiline, skip_whitespace_between_items=skip_whitespace_between_items,
-                 discardbufferdata=discardbufferdata)
+                 discardbufferdata=discardbufferdata, name=name)
 
     def _decode_key(self, readbuf, offset=0, discardbufferdata=None):
         try:
@@ -216,17 +217,17 @@ class DictCodec(ListCodec):
 
     def _unhook(self, obj):
         suggestion = "Please implement a custom unhook function, or a 'getinitkwargs' method or list for this class."
-        if isinstance(obj, dict):
-            return self.dicttype(obj)
-        elif hasattr(obj, "getinitkwargs") and not isinstance(obj.getinitkwargs, (list, tuple)):
+        if hasattr(obj, "getinitkwargs") and not isinstance(obj.getinitkwargs, (list, tuple)):
             if callable(obj.getinitkwargs):
                 """
-                Assume obj.getinitargs is an instance method that returns a list of arguments that
-                returns a list of args that can be used to recreate obj using obj.__class__(*args).
+                Assume obj.getinitkwargs is an instance method that returns a dict 'kwargs' that can be used to
+                recreate obj using obj.__class__(**kwargs).
                 """
                 return obj.getinitkwargs()
             else:
                 raise EncodeError(self, obj, "Do not know how to work with 'getinitargs' object for '%s' object." % obj.__class__.__name__)
+        elif isinstance(obj, dict):
+            return self.dicttype(obj)
         elif hasattr(obj, "__init__") and isinstance(obj.__init__, types.MethodType):
             try:
                 argspec = inspect.getargspec(obj.__init__)
@@ -245,7 +246,7 @@ class DictCodec(ListCodec):
                         "Cowardly refusing to unhook '%s' object containing 'keywords' in its initialization arguments. %s" %
                         obj.__class__.__name__, suggestion)
 
-            if hasattr(obj, "getkwargs") and isinstance(obj.getinitkwargs, (list, tuple)):
+            if hasattr(obj, "getinitkwargs") and isinstance(obj.getinitkwargs, (list, tuple)):
                 args = obj.getinitkwargs
             else:
                 args = argspec.args[1:]
